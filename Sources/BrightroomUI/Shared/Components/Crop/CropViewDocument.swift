@@ -76,9 +76,45 @@ final class CropViewDocument {
     self.editingStack = editingStack
   }
 
+  /// The source mirrored by the edit's mirror node, kept so repeated snapshots
+  /// hand the canvas the same image instance and don't force a re-render.
+  private var mirroredSource: (source: CIImage, mirror: MirrorFeature, image: CIImage)?
+
   /// The latest edit projection available to the crop canvas.
   var snapshot: CropViewDocumentSnapshot? {
-    editingStack.loadedState.flatMap(CropViewDocumentSnapshot.init)
+    guard
+      let loadedState = editingStack.loadedState,
+      var snapshot = CropViewDocumentSnapshot(loadedState: loadedState)
+    else {
+      return nil
+    }
+    snapshot.editingSourceImage = displaySourceImage(for: loadedState)
+    return snapshot
+  }
+
+  /// The editing source with the edit's mirror node applied.
+  ///
+  /// The canvas evaluates only global effects and local adjustments over the
+  /// source, so the mirror, which sits before every other feature, is applied
+  /// here to keep the crop and masks addressing the same domain as export.
+  private func displaySourceImage(for loadedState: EditingStack.Loaded) -> CIImage {
+    let source = loadedState.editingSourceImage
+    guard
+      let mirror = EditingFeatureTree(edit: loadedState.currentEdit).mirror,
+      mirror.isEnabled,
+      mirror.isIdentity == false
+    else {
+      return source
+    }
+
+    if let mirroredSource, mirroredSource.source === source, mirroredSource.mirror == mirror {
+      return mirroredSource.image
+    }
+
+    let extent = source.extent
+    let image = source.transformed(by: mirror.transform(in: extent)).cropped(to: extent)
+    mirroredSource = (source, mirror, image)
+    return image
   }
 
   /// Starts any asynchronous source-image preparation required before a
