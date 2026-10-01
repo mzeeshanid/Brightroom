@@ -96,6 +96,25 @@ public struct SwiftUICropView: View {
     }
   }
 
+  /// Reloads the mounted canvas from the current edit.
+  ///
+  /// CropView is the single writer for its crop while mounted and does not
+  /// observe external stack changes. Call this after changing the edit from
+  /// outside, such as undo, redo or a mirror, having first committed pending
+  /// canvas work with `ApplyAction` so nothing is lost.
+  public final class ReloadAction {
+
+    var onCall: () -> Void = {}
+
+    public init() {
+
+    }
+
+    public func callAsFunction() {
+      onCall()
+    }
+  }
+
   /// Commits the current live straighten angle into CropView's recorded crop
   /// geometry.
   ///
@@ -169,6 +188,7 @@ public struct SwiftUICropView: View {
   private var _resetAction: ResetAction?
   private var _rotateAction: RotateAction?
   private var _applyAction: ApplyAction?
+  private var _reloadAction: ReloadAction?
   private var _adjustmentAngleCommitAction: AdjustmentAngleCommitAction?
 
   private let stateHandler: @MainActor (StateSnapshot) -> Void
@@ -297,6 +317,7 @@ public struct SwiftUICropView: View {
           resetAction: _resetAction,
           rotateAction: _rotateAction,
           applyAction: _applyAction,
+          reloadAction: _reloadAction,
           adjustmentAngleCommitAction: _adjustmentAngleCommitAction,
           stateHandler: stateHandler,
           isGuideInteractionEnabled: isGuideInteractionEnabled,
@@ -414,6 +435,13 @@ public struct SwiftUICropView: View {
 
   }
 
+  public consuming func registerReloadAction(_ action: ReloadAction) -> Self {
+
+    self._reloadAction = action
+    return self
+
+  }
+
 }
 
 @available(iOS 14, *)
@@ -428,6 +456,7 @@ private struct LoadedCropViewRepresentable: UIViewRepresentable {
   let resetAction: SwiftUICropView.ResetAction?
   let rotateAction: SwiftUICropView.RotateAction?
   let applyAction: SwiftUICropView.ApplyAction?
+  let reloadAction: SwiftUICropView.ReloadAction?
   let adjustmentAngleCommitAction: SwiftUICropView.AdjustmentAngleCommitAction?
   let stateHandler: @MainActor (SwiftUICropView.StateSnapshot) -> Void
   let isGuideInteractionEnabled: Bool
@@ -553,6 +582,10 @@ private struct LoadedCropViewRepresentable: UIViewRepresentable {
 
     applyAction?.onCall = { [weak cropView] in
       cropView?.applyDocumentChanges()
+    }
+
+    reloadAction?.onCall = { [weak cropView] in
+      cropView?.loadCurrentDocumentState()
     }
 
     adjustmentAngleCommitAction?.onCall = { [weak cropView] angle in

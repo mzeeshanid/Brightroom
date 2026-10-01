@@ -68,6 +68,16 @@ public enum CropRotation: Equatable, CaseIterable, Sendable {
     }
   }
 
+  /// The rotation one quarter turn the other way from `next()`.
+  public func previous() -> Self {
+    switch self {
+    case .angle_0: return .angle_270
+    case .angle_90: return .angle_0
+    case .angle_180: return .angle_90
+    case .angle_270: return .angle_180
+    }
+  }
+
   /// Maps from the engine's quarter-turn rotation.
   public init(_ quarterTurn: QuarterTurn) {
     switch quarterTurn {
