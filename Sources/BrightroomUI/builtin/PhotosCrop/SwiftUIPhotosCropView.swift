@@ -68,6 +68,7 @@ public struct SwiftUIPhotosCropView: View {
   private let localizedStrings: LocalizedStrings
   private let onDone: @MainActor () -> Void
   private let onCancel: @MainActor () -> Void
+  private let toolbarMenu: (@MainActor (PhotosCropEditorActions) -> AnyView)?
 
   public init(
     editingModel: PhotosCropEditingModel,
@@ -81,6 +82,28 @@ public struct SwiftUIPhotosCropView: View {
     self.localizedStrings = localizedStrings
     self.onDone = onDone
     self.onCancel = onCancel
+    self.toolbarMenu = nil
+  }
+
+  /// Creates the editor with a host-supplied toolbar menu.
+  ///
+  /// The menu replaces the Rotate button with an ellipsis button. Its content
+  /// receives `PhotosCropEditorActions` for undo, redo, rotating and mirroring,
+  /// and may add items of its own.
+  public init<MenuContent: View>(
+    editingModel: PhotosCropEditingModel,
+    options: Options = .init(),
+    localizedStrings: LocalizedStrings = .init(),
+    @ViewBuilder toolbarMenu: @escaping @MainActor (PhotosCropEditorActions) -> MenuContent,
+    onDone: @escaping @MainActor () -> Void,
+    onCancel: @escaping @MainActor () -> Void
+  ) {
+    self.editingModel = editingModel
+    self.options = options
+    self.localizedStrings = localizedStrings
+    self.onDone = onDone
+    self.onCancel = onCancel
+    self.toolbarMenu = { AnyView(toolbarMenu($0)) }
   }
 
   public var body: some View {
@@ -88,6 +111,7 @@ public struct SwiftUIPhotosCropView: View {
       editingModel: editingModel,
       options: options,
       localizedStrings: localizedStrings,
+      toolbarMenu: toolbarMenu,
       onDone: onDone,
       onCancel: onCancel
     )

@@ -138,6 +138,55 @@ public final class PhotosCropEditingModel {
       || abs(crop.cropExtent.height - initial.cropExtent.height) > tolerance
   }
 
+  /// Whether the stack has an earlier state to undo to.
+  var canUndo: Bool {
+    loadedState?.canUndo ?? false
+  }
+
+  /// Whether the stack has an undone state to redo.
+  var canRedo: Bool {
+    loadedState?.canRedo ?? false
+  }
+
+  /// Moves the stack to its previous checkpoint.
+  func undo() {
+    editingStack.undo()
+  }
+
+  /// Reapplies the most recently undone checkpoint.
+  func redo() {
+    editingStack.redo()
+  }
+
+  /// Mirrors the output as it is displayed.
+  ///
+  /// The mirror applies to the source, before the crop's quarter turn, so a
+  /// sideways turn maps the on-screen axis onto the other source axis.
+  func mirrorOutput(_ axis: MirrorAxis) {
+    guard var edit = loadedState?.currentEdit else {
+      return
+    }
+
+    let isSideways = featureTree?.finalCrop?.rotation.isSideways ?? false
+    let sourceAxis: MirrorAxis
+    switch axis {
+    case .horizontal: sourceAxis = isSideways ? .vertical : .horizontal
+    case .vertical: sourceAxis = isSideways ? .horizontal : .vertical
+    }
+
+    edit.mirror(sourceAxis)
+    applyEditIfChanged(edit)
+  }
+
+  /// Whether a crop-canvas state differs from the stack's final crop, meaning
+  /// the canvas holds crop work that has not been applied yet.
+  func hasUnappliedCropChanges(_ crop: CropEditingState) -> Bool {
+    guard let finalCrop = finalCropEditingState else {
+      return false
+    }
+    return crop.isRenderingEquivalent(to: finalCrop) == false
+  }
+
   /// Writes the selected preset into PhotosCrop's global-effects node.
   func selectFilterPreset(_ preset: PresetFeature?) {
     updateGlobalEffects { effects in
@@ -280,11 +329,13 @@ extension SwiftUICropView {
   /// crop canvas document.
   init(
     editingModel: PhotosCropEditingModel,
-    isGuideInteractionEnabled: Bool
+    isGuideInteractionEnabled: Bool,
+    stateHandler: @escaping @MainActor (StateSnapshot) -> Void = { _ in }
   ) {
     self.init(
       document: editingModel.cropViewDocument,
-      isGuideInteractionEnabled: isGuideInteractionEnabled
+      isGuideInteractionEnabled: isGuideInteractionEnabled,
+      stateHandler: stateHandler
     )
   }
 }

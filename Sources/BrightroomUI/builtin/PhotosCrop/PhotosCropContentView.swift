@@ -30,6 +30,7 @@ struct PhotosCropContentView: View {
   let editingModel: PhotosCropEditingModel
   let options: SwiftUIPhotosCropView.Options
   let localizedStrings: SwiftUIPhotosCropView.LocalizedStrings
+  let toolbarMenu: (@MainActor (PhotosCropEditorActions) -> AnyView)?
   let onDone: @MainActor () -> Void
   let onCancel: @MainActor () -> Void
 
@@ -46,17 +47,23 @@ struct PhotosCropContentView: View {
   @State private var applyAction = SwiftUICropView.ApplyAction()
   @State private var adjustmentAngleCommitAction =
     SwiftUICropView.AdjustmentAngleCommitAction()
+  @State private var reloadAction = SwiftUICropView.ReloadAction()
+  /// Whether the crop canvas holds crop work not yet applied to the stack,
+  /// which undo has to account for.
+  @State private var hasUnappliedCropChanges = false
 
   init(
     editingModel: PhotosCropEditingModel,
     options: SwiftUIPhotosCropView.Options,
     localizedStrings: SwiftUIPhotosCropView.LocalizedStrings,
+    toolbarMenu: (@MainActor (PhotosCropEditorActions) -> AnyView)? = nil,
     onDone: @escaping @MainActor () -> Void,
     onCancel: @escaping @MainActor () -> Void
   ) {
     self.editingModel = editingModel
     self.options = options
     self.localizedStrings = localizedStrings
+    self.toolbarMenu = toolbarMenu
     self.onDone = onDone
     self.onCancel = onCancel
 
@@ -95,8 +102,10 @@ struct PhotosCropContentView: View {
             resetAction: resetAction,
             rotateAction: rotateAction,
             applyAction: applyAction,
+            reloadAction: reloadAction,
             adjustmentAngleCommitAction: adjustmentAngleCommitAction,
-            featureFocus: model.featureFocus(for: editingMode)
+            featureFocus: model.featureFocus(for: editingMode),
+            onCropStateChange: trackUnappliedCropChanges
           )
           .layoutPriority(1)
 
@@ -148,6 +157,7 @@ struct PhotosCropContentView: View {
           mode: editingMode,
           isSelectingAspectRatio: isSelectingAspectRatio,
           onRotate: rotate,
+          menu: toolbarMenu.map { $0(editorActions) },
           onReset: reset,
           onToggleAspectRatio: toggleAspectRatioControl,
           onSelectMode: selectMode,
@@ -192,6 +202,88 @@ struct PhotosCropContentView: View {
 
   private func reset() {
     resetAction()
+  }
+
+  private var editorActions: PhotosCropEditorActions {
+    let isLoaded = editingModel.isLoaded
+    return PhotosCropEditorActions(
+      canUndo: isLoaded && (editingModel.canUndo || hasUnappliedCropChanges),
+      canRedo: isLoaded && editingModel.canRedo && hasUnappliedCropChanges == false,
+      canTransform: isLoaded && editingMode == .crop,
+      onUndo: undo,
+      onRedo: redo,
+      onRotate: rotate(_:),
+      onMirror: mirror,
+      onCommitPendingEdits: commitPendingEdits
+    )
+  }
+
+  private func trackUnappliedCropChanges(_ snapshot: SwiftUICropView.StateSnapshot) {
+    let hasChanges = snapshot.proposedCrop.map {
+      editingModel.hasUnappliedCropChanges($0)
+    } ?? false
+
+    if hasUnappliedCropChanges != hasChanges {
+      hasUnappliedCropChanges = hasChanges
+    }
+  }
+
+  /// Applies the canvas's crop work to the stack and checkpoints it, so stack
+  /// history operations start from what is on screen.
+  private func commitPendingEdits() {
+    if editingMode == .crop {
+      applyAction()
+    }
+    editingModel.commitCurrentEditIfNeeded()
+  }
+
+  private func undo() {
+    commitPendingEdits()
+    editingModel.undo()
+    reloadAfterHistoryChange()
+  }
+
+  private func redo() {
+    commitPendingEdits()
+    editingModel.redo()
+    reloadAfterHistoryChange()
+  }
+
+  private func reloadAfterHistoryChange() {
+    // A restored crop need not fit the aspect ratio locked now; leaving the
+    // lock in place would refit it on the next update.
+    if isAspectRatioControlAvailable {
+      aspectRatioSelection = .freeform
+    }
+    reloadAction()
+    hasUnappliedCropChanges = false
+  }
+
+  private func rotate(_ direction: PhotosCropRotationDirection) {
+    guard editingMode == .crop else {
+      return
+    }
+
+    switch direction {
+    case .left:
+      rotateAction()
+    case .right:
+      // The rotation binding drives the canvas, which also swaps a locked
+      // aspect ratio for sideways turns, just as the Rotate button does.
+      rotation = (rotation ?? .angle_0).previous()
+    }
+  }
+
+  private func mirror(_ axis: MirrorAxis) {
+    guard editingMode == .crop else {
+      return
+    }
+
+    commitPendingEdits()
+    editingModel.mirrorOutput(axis)
+    // A mirror is its own undo step.
+    editingModel.commitCurrentEditIfNeeded()
+    reloadAction()
   }
 
   private func toggleAspectRatioControl() {
@@ -457,13 +549,16 @@ private struct PhotosCropCanvasHost: View {
   let resetAction: SwiftUICropView.ResetAction
   let rotateAction: SwiftUICropView.RotateAction
   let applyAction: SwiftUICropView.ApplyAction
+  let reloadAction: SwiftUICropView.ReloadAction
   let adjustmentAngleCommitAction: SwiftUICropView.AdjustmentAngleCommitAction
   let featureFocus: CropViewFeatureFocus
+  let onCropStateChange: @MainActor (SwiftUICropView.StateSnapshot) -> Void
 
   var body: some View {
     SwiftUICropView(
       editingModel: editingModel,
-      isGuideInteractionEnabled: mode == .crop
+      isGuideInteractionEnabled: mode == .crop,
+      stateHandler: onCropStateChange
     )
     .rotation(rotation)
     .adjustmentAngle(adjustmentAngle)
@@ -476,6 +571,7 @@ private struct PhotosCropCanvasHost: View {
     .registerResetAction(resetAction)
     .registerRotateAction(rotateAction)
     .registerApplyAction(applyAction)
+    .registerReloadAction(reloadAction)
     .registerAdjustmentAngleCommitAction(adjustmentAngleCommitAction)
   }
 
@@ -567,6 +663,9 @@ private struct PhotosCropToolbar: ToolbarContent {
   let mode: PhotosCropEditingMode
   let isSelectingAspectRatio: Bool
   let onRotate: () -> Void
+  /// Host-supplied menu content shown behind an ellipsis button in place of
+  /// the Rotate button.
+  let menu: AnyView?
   let onReset: () -> Void
   let onToggleAspectRatio: () -> Void
   let onSelectMode: (PhotosCropEditingMode) -> Void
@@ -590,22 +689,13 @@ private struct PhotosCropToolbar: ToolbarContent {
     }
 
     ToolbarItem(placement: .topBarLeading) {
-      switch mode {
-      case .crop:
-        PhotosCropToolbarIconButton(
-          systemName: "rotate.left",
-          accessibilityLabel: "Rotate",
-          accessibilityIdentifier: "photos.crop.rotate",
-          isEnabled: isLoaded && mode == .crop,
-          isHighlighted: false,
-          action: onRotate
+      if let menu {
+        PhotosCropToolbarMenuButton(
+          isEnabled: isLoaded,
+          content: menu
         )
-      case .adjustments:
-        EmptyView()
-      case .blurMasking:
-        EmptyView()
-      case .filters:
-        EmptyView()
+      } else {
+        rotateButton
       }
     }
 
@@ -661,6 +751,49 @@ private struct PhotosCropToolbar: ToolbarContent {
       )
     }
 
+  }
+
+  @ViewBuilder
+  private var rotateButton: some View {
+    switch mode {
+    case .crop:
+      PhotosCropToolbarIconButton(
+        systemName: "rotate.left",
+        accessibilityLabel: "Rotate",
+        accessibilityIdentifier: "photos.crop.rotate",
+        isEnabled: isLoaded && mode == .crop,
+        isHighlighted: false,
+        action: onRotate
+      )
+    case .adjustments:
+      EmptyView()
+    case .blurMasking:
+      EmptyView()
+    case .filters:
+      EmptyView()
+    }
+  }
+}
+
+/// The ellipsis button that opens a host-supplied toolbar menu.
+private struct PhotosCropToolbarMenuButton: View {
+
+  let isEnabled: Bool
+  let content: AnyView
+
+  var body: some View {
+    Menu {
+      content
+    } label: {
+      Image(systemName: "ellipsis")
+        .font(.system(size: 20, weight: .regular))
+        .imageScale(.medium)
+        .symbolRenderingMode(.monochrome)
+        .foregroundStyle(Color(white: 0.6))
+    }
+    .disabled(!isEnabled)
+    .accessibilityLabel("More")
+    .accessibilityIdentifier("photos.crop.more")
   }
 }
 
