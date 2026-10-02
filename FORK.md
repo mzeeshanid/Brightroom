@@ -39,7 +39,7 @@ app build may still resolve.
 
 ## Patches
 
-Current base: **5.1.2**, released as **5.1.2-mz.2**. `git log 5.1.2..mz/main` lists them.
+Current base: **5.1.2**, released as **5.1.2-mz.3**. `git log 5.1.2..mz/main` lists them.
 
 | Patch | Files | Why | Upstream PR |
 | --- | --- | --- | --- |
@@ -49,6 +49,7 @@ Current base: **5.1.2**, released as **5.1.2-mz.2**. `git log 5.1.2..mz/main` li
 | Test `MirrorFeature` | `Tests/BrightroomParametricTests/MirrorFeatureTests.swift` | — | — |
 | Host toolbar menu for `SwiftUIPhotosCropView` | `builtin/PhotosCrop/PhotosCropEditorActions.swift` (new), `SwiftUIPhotosCropView.swift`, `PhotosCropContentView.swift`, `PhotosCropEditingModel.swift` | Ellipsis menu replacing the Rotate button, with undo/redo, rotate and mirror | — |
 | Add `SourceFeatureType` and `PhotosCropEditorActions.applyEdit(_:)` | `BrightroomParametric/SourceFeature.swift` (new), `MirrorFeature.swift`, `EditingStack.Edit+Mirror.swift`, `CropViewDocument.swift`, `PhotosCropEditorActions.swift`, `PhotosCropContentView.swift`, `PhotosCropEditingModel.swift`, `Tests/BrightroomParametricTests/SourceFeatureTests.swift` | Host-defined source-domain features (the app's background removal) that the canvas shows and undo covers | — |
+| Built-in undo/redo, rotate and flip controls in the `toolbarMenu:` layout | `PhotosCropContentView.swift`, `SwiftUIPhotosCropView.swift` | Icon Cancel/Done, Undo/Redo beside Cancel, Rotate and Flip menus either side of the straighten slider | — |
 | This file | `FORK.md` | — | — |
 
 ## Design decisions to keep when resolving conflicts
@@ -100,6 +101,13 @@ Current base: **5.1.2**, released as **5.1.2-mz.2**. `git log 5.1.2..mz/main` li
   matching the built-in Rotate button. Undo/redo work in every tool.
 - **The original `SwiftUIPhotosCropView` initializer is unchanged**; the menu is
   opt-in through the `toolbarMenu:` initializer.
+- **The `toolbarMenu:` layout has built-in controls** driven by the same
+  `PhotosCropEditorActions` the host menu gets: Cancel and Done as icons
+  (`xmark`, `checkmark`), Undo and Redo between Cancel and the ellipsis, and
+  Rotate (left/right) and Flip (horizontal/vertical) menus either side of the
+  crop tool's straighten slider. Their titles are `LocalizedStrings`
+  (`button_undo_title` … `button_flip_vertical_title`) and double as
+  accessibility labels for the icon buttons. The host menu shouldn't repeat them.
 
 ## Known limitations
 
@@ -141,9 +149,8 @@ Then update the app ([below](#updating-the-app-pin)), build it, and run the
 App code that depends on this fork's API, which must change if the API does:
 
 - `MZFileManage/Features/ImageEditor/ImageEditorView.swift`: uses the
-  `toolbarMenu:` initializer, `PhotosCropEditorActions` (`undo`, `redo`, `rotate`,
-  `mirror`, `commitPendingEdits`, `applyEdit`, `canUndo`, `canRedo`, `canTransform`),
-  `MirrorAxis`, and `EditingStack.featureTree?.finalCrop` for the output size.
+  `toolbarMenu:` initializer (its menu holds only Adjust Size and Remove
+  Background), `PhotosCropEditorActions` (`commitPendingEdits`, `applyEdit`), and `EditingStack.featureTree?.finalCrop` for the output size.
 - `BackgroundRemovalFeature.swift`: a `SourceFeatureType` holding a Vision subject
   mask made from `loadedState.editingSourceImage`, inserted at index 0 through
   `applyEdit`. Export switches JPEG to PNG while it's in the edit.
@@ -167,9 +174,10 @@ Change both files, then build:
 
 In the editor (Files → an image → Edit), in the Crop tool:
 
-1. Drag the crop, then Undo: the crop returns; Redo brings it back.
-2. Lock an aspect ratio, Rotate Left and Rotate Right: the ratio swaps on each turn.
-3. Rotate 90°, then Flip Horizontal: the image mirrors left–right on screen.
+1. Drag the crop, then Undo (toolbar, beside Cancel): the crop returns; Redo brings it back.
+2. Lock an aspect ratio, then Rotate Left and Rotate Right from the menu left of the
+   straighten slider: the ratio swaps on each turn.
+3. Rotate 90°, then Flip Horizontal from the menu right of the slider: the image mirrors left–right on screen.
 4. Paint a blur mask, then Flip: the blur stays on the same subject.
 5. Adjust Size to half the width, Done, and check the saved image's size and that it
    matches the preview, including the flip.
