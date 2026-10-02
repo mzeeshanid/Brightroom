@@ -83,6 +83,9 @@ struct PhotosCropContentView: View {
     let isLoaded = model.isLoaded
     let bottomControlHeight: CGFloat = 120
     let bottomControlMaxWidth: CGFloat = 560
+    // The `toolbarMenu:` layout adds built-in undo/redo, rotate and flip
+    // controls driven by the same actions the host menu receives.
+    let hostActions = toolbarMenu == nil ? nil : editorActions
 
     NavigationStack {
       ZStack {
@@ -122,6 +125,7 @@ struct PhotosCropContentView: View {
             adjustmentAngle: adjustmentAngle,
             isSelectingAspectRatio: isSelectingAspectRatio,
             isLoaded: isLoaded,
+            transformActions: hostActions,
             onSelectAspectRatio: selectAspectRatio,
             onSetAdjustmentAngle: setAdjustmentAngle,
             onCommitAdjustmentAngle: commitAdjustmentAngle,
@@ -148,16 +152,15 @@ struct PhotosCropContentView: View {
       .toolbarColorScheme(.dark, for: .navigationBar, .bottomBar)
       .toolbar {
         PhotosCropToolbar(
-          resetTitle: localizedStrings.button_reset_title,
-          cancelTitle: localizedStrings.button_cancel_title,
-          doneTitle: localizedStrings.button_done_title,
+          localizedStrings: localizedStrings,
           isLoaded: isLoaded,
           hasCropChanges: model.hasCropChanges(),
           isDoneEnabled: isLoaded,
           mode: editingMode,
           isSelectingAspectRatio: isSelectingAspectRatio,
           onRotate: rotate,
-          menu: toolbarMenu.map { $0(editorActions) },
+          menu: hostActions.flatMap { actions in toolbarMenu.map { $0(actions) } },
+          historyActions: hostActions,
           onReset: reset,
           onToggleAspectRatio: toggleAspectRatioControl,
           onSelectMode: selectMode,
@@ -600,6 +603,9 @@ private struct PhotosCropControlHost: View {
   let adjustmentAngle: CropEditingState.AdjustmentAngle?
   let isSelectingAspectRatio: Bool
   let isLoaded: Bool
+  /// Drives the Rotate and Flip menus beside the straighten slider; `nil`
+  /// hides them.
+  let transformActions: PhotosCropEditorActions?
   let onSelectAspectRatio: (PhotosCropAspectRatioSelection) -> Void
   let onSetAdjustmentAngle: (Double) -> Void
   let onCommitAdjustmentAngle: (Double) -> Void
@@ -620,6 +626,7 @@ private struct PhotosCropControlHost: View {
           adjustmentAngle: adjustmentAngle,
           isSelectingAspectRatio: isSelectingAspectRatio,
           isLoaded: isLoaded,
+          transformActions: transformActions,
           onSelectAspectRatio: onSelectAspectRatio,
           onSetAdjustmentAngle: onSetAdjustmentAngle,
           onCommitAdjustmentAngle: onCommitAdjustmentAngle
@@ -663,9 +670,7 @@ private struct PhotosCropControlHost: View {
 
 private struct PhotosCropToolbar: ToolbarContent {
 
-  let resetTitle: String
-  let cancelTitle: String
-  let doneTitle: String
+  let localizedStrings: SwiftUIPhotosCropView.LocalizedStrings
   let isLoaded: Bool
   let hasCropChanges: Bool
   let isDoneEnabled: Bool
@@ -675,6 +680,9 @@ private struct PhotosCropToolbar: ToolbarContent {
   /// Host-supplied menu content shown behind an ellipsis button in place of
   /// the Rotate button.
   let menu: AnyView?
+  /// Set in the `toolbarMenu:` layout, which shows Cancel and Done as icons
+  /// and Undo and Redo buttons between Cancel and the ellipsis.
+  let historyActions: PhotosCropEditorActions?
   let onReset: () -> Void
   let onToggleAspectRatio: () -> Void
   let onSelectMode: (PhotosCropEditingMode) -> Void
@@ -683,18 +691,53 @@ private struct PhotosCropToolbar: ToolbarContent {
 
   var body: some ToolbarContent {
     ToolbarItem(placement: .topBarLeading) {
-      PhotosCropToolbarTextButton(
-        title: cancelTitle,
-        accessibilityIdentifier: "photos.crop.cancel",
-        isEnabled: true,
-        role: .normal,
-        minWidth: nil,
-        action: onCancel
-      )
+      if historyActions != nil {
+        PhotosCropToolbarIconButton(
+          systemName: "xmark",
+          accessibilityLabel: localizedStrings.button_cancel_title,
+          accessibilityIdentifier: "photos.crop.cancel",
+          isEnabled: true,
+          isHighlighted: false,
+          action: onCancel
+        )
+      } else {
+        PhotosCropToolbarTextButton(
+          title: localizedStrings.button_cancel_title,
+          accessibilityIdentifier: "photos.crop.cancel",
+          isEnabled: true,
+          role: .normal,
+          minWidth: nil,
+          action: onCancel
+        )
+      }
     }
 
     if #available(iOS 26.0, *) {
       ToolbarSpacer(.fixed, placement: .topBarLeading)
+    }
+
+    if let historyActions {
+      ToolbarItem(placement: .topBarLeading) {
+        PhotosCropToolbarIconButton(
+          systemName: "arrow.uturn.backward",
+          accessibilityLabel: localizedStrings.button_undo_title,
+          accessibilityIdentifier: "photos.crop.undo",
+          isEnabled: historyActions.canUndo,
+          isHighlighted: false,
+          action: historyActions.undo
+        )
+      }
+
+      ToolbarItem(placement: .topBarLeading) {
+        PhotosCropToolbarIconButton(
+          systemName: "arrow.uturn.forward",
+          accessibilityLabel: localizedStrings.button_redo_title,
+          accessibilityIdentifier: "photos.crop.redo",
+          isEnabled: historyActions.canRedo,
+          isHighlighted: false,
+          action: historyActions.redo
+        )
+      }
     }
 
     ToolbarItem(placement: .topBarLeading) {
@@ -711,7 +754,7 @@ private struct PhotosCropToolbar: ToolbarContent {
     ToolbarItem(placement: .principal) {
       if hasCropChanges && mode == .crop {
         PhotosCropToolbarTextButton(
-          title: resetTitle,
+          title: localizedStrings.button_reset_title,
           accessibilityIdentifier: "photos.crop.reset",
           isEnabled: isLoaded,
           role: .highlighted,
@@ -750,14 +793,25 @@ private struct PhotosCropToolbar: ToolbarContent {
     }
 
     ToolbarItem(placement: .topBarTrailing) {
-      PhotosCropToolbarTextButton(
-        title: doneTitle,
-        accessibilityIdentifier: "photos.crop.done",
-        isEnabled: isDoneEnabled,
-        role: .highlighted,
-        minWidth: nil,
-        action: onDone
-      )
+      if historyActions != nil {
+        PhotosCropToolbarIconButton(
+          systemName: "checkmark",
+          accessibilityLabel: localizedStrings.button_done_title,
+          accessibilityIdentifier: "photos.crop.done",
+          isEnabled: isDoneEnabled,
+          isHighlighted: true,
+          action: onDone
+        )
+      } else {
+        PhotosCropToolbarTextButton(
+          title: localizedStrings.button_done_title,
+          accessibilityIdentifier: "photos.crop.done",
+          isEnabled: isDoneEnabled,
+          role: .highlighted,
+          minWidth: nil,
+          action: onDone
+        )
+      }
     }
 
   }
@@ -821,14 +875,20 @@ private struct PhotosCropToolbarIconButton: View {
         .font(.system(size: 20, weight: .regular))
         .imageScale(.medium)
         .symbolRenderingMode(.monochrome)
-        .foregroundStyle(
-          isHighlighted ? Color(uiColor: .systemYellow) : Color(white: 0.6)
-        )
+        .foregroundStyle(foregroundStyle)
     }
     .disabled(!isEnabled)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(accessibilityLabel)
     .accessibilityIdentifier(accessibilityIdentifier)
+  }
+
+  private var foregroundStyle: Color {
+    guard isEnabled else {
+      return Color(uiColor: .darkGray)
+    }
+
+    return isHighlighted ? Color(uiColor: .systemYellow) : Color(white: 0.6)
   }
 }
 
@@ -1541,6 +1601,7 @@ private struct PhotosCropAdjustmentControl: View {
   let adjustmentAngle: CropEditingState.AdjustmentAngle?
   let isSelectingAspectRatio: Bool
   let isLoaded: Bool
+  let transformActions: PhotosCropEditorActions?
   let onSelectAspectRatio: (PhotosCropAspectRatioSelection) -> Void
   let onSetAdjustmentAngle: (Double) -> Void
   let onCommitAdjustmentAngle: (Double) -> Void
@@ -1556,12 +1617,31 @@ private struct PhotosCropAdjustmentControl: View {
         )
         .transition(.opacity)
       } else {
-        PhotosCropRotationSlider(
-          value: adjustmentAngle?.degrees ?? 0,
-          isEnabled: isLoaded,
-          onChange: onSetAdjustmentAngle,
-          onEditingEnded: onCommitAdjustmentAngle
-        )
+        HStack(spacing: 18) {
+          if let transformActions {
+            PhotosCropRotateMenu(
+              actions: transformActions,
+              localizedStrings: localizedStrings
+            )
+          }
+
+          PhotosCropRotationSlider(
+            value: adjustmentAngle?.degrees ?? 0,
+            isEnabled: isLoaded,
+            onChange: onSetAdjustmentAngle,
+            onEditingEnded: onCommitAdjustmentAngle
+          )
+
+          if let transformActions {
+            PhotosCropFlipMenu(
+              actions: transformActions,
+              localizedStrings: localizedStrings
+            )
+          }
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .environment(\.colorScheme, .dark)
         .transition(.opacity)
       }
     }
@@ -1618,8 +1698,6 @@ private struct PhotosCropRotationSlider: View {
     )
     .tint(.white)
     .frame(height: 50)
-    .padding(.horizontal, 24)
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .opacity(isEnabled ? 1 : 0.5)
     .disabled(!isEnabled)
     .accessibilityLabel("Rotation")
@@ -1642,6 +1720,94 @@ private struct PhotosCropRotationSlider: View {
 
 private enum PhotosCropRotationSliderMetrics {
   static let neutralDeadZoneDegrees: Double = 0.5
+}
+
+/// The quarter-turn menu to the left of the straighten slider.
+private struct PhotosCropRotateMenu: View {
+
+  let actions: PhotosCropEditorActions
+  let localizedStrings: SwiftUIPhotosCropView.LocalizedStrings
+
+  var body: some View {
+    PhotosCropControlMenuButton(
+      systemName: "rotate.left",
+      accessibilityLabel: localizedStrings.button_rotate_title,
+      accessibilityIdentifier: "photos.crop.rotate-menu",
+      isEnabled: actions.canTransform
+    ) {
+      Button {
+        actions.rotate(.left)
+      } label: {
+        Label(localizedStrings.button_rotate_left_title, systemImage: "rotate.left")
+      }
+      Button {
+        actions.rotate(.right)
+      } label: {
+        Label(localizedStrings.button_rotate_right_title, systemImage: "rotate.right")
+      }
+    }
+  }
+}
+
+/// The mirror menu to the right of the straighten slider.
+private struct PhotosCropFlipMenu: View {
+
+  let actions: PhotosCropEditorActions
+  let localizedStrings: SwiftUIPhotosCropView.LocalizedStrings
+
+  var body: some View {
+    PhotosCropControlMenuButton(
+      systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right",
+      accessibilityLabel: localizedStrings.button_flip_title,
+      accessibilityIdentifier: "photos.crop.flip-menu",
+      isEnabled: actions.canTransform
+    ) {
+      Button {
+        actions.mirror(.horizontal)
+      } label: {
+        Label(
+          localizedStrings.button_flip_horizontal_title,
+          systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right"
+        )
+      }
+      Button {
+        actions.mirror(.vertical)
+      } label: {
+        Label(
+          localizedStrings.button_flip_vertical_title,
+          systemImage: "arrow.up.and.down.righttriangle.up.righttriangle.down"
+        )
+      }
+    }
+  }
+}
+
+/// An icon button beside a bottom control that opens a menu, sized like the
+/// blur tool's trash button.
+private struct PhotosCropControlMenuButton<Content: View>: View {
+
+  let systemName: String
+  let accessibilityLabel: String
+  let accessibilityIdentifier: String
+  let isEnabled: Bool
+  @ViewBuilder let content: () -> Content
+
+  var body: some View {
+    Menu {
+      content()
+    } label: {
+      Image(systemName: systemName)
+        .font(.system(size: 20, weight: .regular))
+        .imageScale(.medium)
+        .symbolRenderingMode(.monochrome)
+        .foregroundStyle(isEnabled ? Color(white: 0.6) : Color(uiColor: .darkGray))
+        .frame(width: 44, height: 52)
+        .contentShape(Rectangle())
+    }
+    .disabled(!isEnabled)
+    .accessibilityLabel(accessibilityLabel)
+    .accessibilityIdentifier(accessibilityIdentifier)
+  }
 }
 
 extension BrightroomSteppedSliderStyle {

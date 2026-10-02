@@ -40,6 +40,15 @@ public struct SwiftUIPhotosCropView: View {
     public var button_aspectratio_freeform: String = "FREEFORM"
     public var button_aspectratio_square: String = "SQUARE"
     public var button_filter_original: String = "ORIGINAL"
+    // Used by the `toolbarMenu:` layout's built-in controls.
+    public var button_undo_title: String = "Undo"
+    public var button_redo_title: String = "Redo"
+    public var button_rotate_title: String = "Rotate"
+    public var button_rotate_left_title: String = "Rotate Left"
+    public var button_rotate_right_title: String = "Rotate Right"
+    public var button_flip_title: String = "Flip"
+    public var button_flip_horizontal_title: String = "Flip Horizontal"
+    public var button_flip_vertical_title: String = "Flip Vertical"
 
     public init() {}
   }
@@ -90,6 +99,10 @@ public struct SwiftUIPhotosCropView: View {
   /// The menu replaces the Rotate button with an ellipsis button. Its content
   /// receives `PhotosCropEditorActions` for undo, redo, rotating and mirroring,
   /// and may add items of its own.
+  ///
+  /// This layout also shows Cancel and Done as icons, Undo and Redo buttons
+  /// between Cancel and the ellipsis, and Rotate and Flip menus either side of
+  /// the crop tool's straighten slider.
   public init<MenuContent: View>(
     editingModel: PhotosCropEditingModel,
     options: Options = .init(),
