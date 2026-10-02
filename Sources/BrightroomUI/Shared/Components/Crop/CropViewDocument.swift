@@ -76,9 +76,10 @@ final class CropViewDocument {
     self.editingStack = editingStack
   }
 
-  /// The source mirrored by the edit's mirror node, kept so repeated snapshots
-  /// hand the canvas the same image instance and don't force a re-render.
-  private var mirroredSource: (source: CIImage, mirror: MirrorFeature, image: CIImage)?
+  /// The source with the edit's source features applied, kept so repeated
+  /// snapshots hand the canvas the same image instance and don't force a
+  /// re-render.
+  private var displaySource: (source: CIImage, features: [MainFeature], image: CIImage)?
 
   /// The latest edit projection available to the crop canvas.
   var snapshot: CropViewDocumentSnapshot? {
@@ -92,28 +93,26 @@ final class CropViewDocument {
     return snapshot
   }
 
-  /// The editing source with the edit's mirror node applied.
+  /// The editing source with the edit's source features applied.
   ///
   /// The canvas evaluates only global effects and local adjustments over the
-  /// source, so the mirror, which sits before every other feature, is applied
-  /// here to keep the crop and masks addressing the same domain as export.
+  /// source, so the source features ahead of the first crop, such as the
+  /// mirror, are applied here to keep the crop and masks addressing the same
+  /// domain as export.
   private func displaySourceImage(for loadedState: EditingStack.Loaded) -> CIImage {
     let source = loadedState.editingSourceImage
-    guard
-      let mirror = EditingFeatureTree(edit: loadedState.currentEdit).mirror,
-      mirror.isEnabled,
-      mirror.isIdentity == false
-    else {
+    let mainTree = loadedState.currentEdit.document.mainTree
+    let features = mainTree.leadingSourceFeatures.map { MainFeature.domain($0) }
+    guard features.isEmpty == false else {
       return source
     }
 
-    if let mirroredSource, mirroredSource.source === source, mirroredSource.mirror == mirror {
-      return mirroredSource.image
+    if let displaySource, displaySource.source === source, displaySource.features == features {
+      return displaySource.image
     }
 
-    let extent = source.extent
-    let image = source.transformed(by: mirror.transform(in: extent)).cropped(to: extent)
-    mirroredSource = (source, mirror, image)
+    let image = mainTree.applyingLeadingSourceFeatures(to: source)
+    displaySource = (source, features, image)
     return image
   }
 

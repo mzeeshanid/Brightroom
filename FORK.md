@@ -39,7 +39,7 @@ app build may still resolve.
 
 ## Patches
 
-Current base: **5.1.2**, released as **5.1.2-mz.1**. `git log 5.1.2..mz/main` lists them.
+Current base: **5.1.2**, released as **5.1.2-mz.2**. `git log 5.1.2..mz/main` lists them.
 
 | Patch | Files | Why | Upstream PR |
 | --- | --- | --- | --- |
@@ -48,6 +48,7 @@ Current base: **5.1.2**, released as **5.1.2-mz.1**. `git log 5.1.2..mz/main` li
 | Add `SwiftUICropView.ReloadAction` and `CropRotation.previous()` | `SwiftUICropView.swift`, `CropRotation.swift` | Reload the canvas after undo/redo/flip; rotate right | — |
 | Test `MirrorFeature` | `Tests/BrightroomParametricTests/MirrorFeatureTests.swift` | — | — |
 | Host toolbar menu for `SwiftUIPhotosCropView` | `builtin/PhotosCrop/PhotosCropEditorActions.swift` (new), `SwiftUIPhotosCropView.swift`, `PhotosCropContentView.swift`, `PhotosCropEditingModel.swift` | Ellipsis menu replacing the Rotate button, with undo/redo, rotate and mirror | — |
+| Add `SourceFeatureType` and `PhotosCropEditorActions.applyEdit(_:)` | `BrightroomParametric/SourceFeature.swift` (new), `MirrorFeature.swift`, `EditingStack.Edit+Mirror.swift`, `CropViewDocument.swift`, `PhotosCropEditorActions.swift`, `PhotosCropContentView.swift`, `PhotosCropEditingModel.swift`, `Tests/BrightroomParametricTests/SourceFeatureTests.swift` | Host-defined source-domain features (the app's background removal) that the canvas shows and undo covers | — |
 | This file | `FORK.md` | — | — |
 
 ## Design decisions to keep when resolving conflicts
@@ -76,6 +77,19 @@ Current base: **5.1.2**, released as **5.1.2-mz.1**. `git log 5.1.2..mz/main` li
   edit, so `CropView.setRotation` swaps a locked aspect ratio for sideways turns
   exactly as the built-in Rotate (`rotateAction`, which is `next()`) does.
   `next()` turns *left* on screen despite `rotateClockwise()`'s name.
+- **Source features generalize the mirror's canvas patch.** `SourceFeatureType`
+  marks an extent-preserving domain feature in oriented-source coordinates.
+  `CropViewDocument.snapshot` applies every enabled one ahead of the first crop
+  (`MainTree.applyingLeadingSourceFeatures`) to `editingSourceImage`, caching on
+  source identity plus the features, so host features show on the canvas without
+  the canvas knowing about them. Their `apply` must be scale-independent: the
+  canvas evaluates them on the downsampled editing source, export on the full one.
+- **The mirror goes after other leading source features**, not at index 0, so a
+  host feature made from the unmirrored source (a subject mask) stays aligned
+  when the image is flipped later.
+- **`applyEdit(_:)` is the host's way to change the stack**: commit pending
+  edits → mutate the current edit → commit a checkpoint → `ReloadAction`, the
+  same sequence as mirror, so a host edit is one undo step. It works in every tool.
 - **Mirroring while rotated sideways swaps the source axis**
   (`PhotosCropEditingModel.mirrorOutput`): the mirror applies before the crop's
   quarter turn.
@@ -91,7 +105,8 @@ Current base: **5.1.2**, released as **5.1.2-mz.1**. `git log 5.1.2..mz/main` li
 
 - Reset restores the crop but not the mirror; Undo removes a mirror.
 - Features after the first crop aren't mapped by `Edit.mirror(_:)` (PhotosCrop has one crop).
-- Filter preset thumbnails are rendered from the unmirrored source.
+- Filter preset thumbnails are rendered from the unmirrored source, without
+  source features.
 
 ## Building and testing
 
@@ -127,8 +142,11 @@ App code that depends on this fork's API, which must change if the API does:
 
 - `MZFileManage/Features/ImageEditor/ImageEditorView.swift`: uses the
   `toolbarMenu:` initializer, `PhotosCropEditorActions` (`undo`, `redo`, `rotate`,
-  `mirror`, `commitPendingEdits`, `canUndo`, `canRedo`, `canTransform`),
+  `mirror`, `commitPendingEdits`, `applyEdit`, `canUndo`, `canRedo`, `canTransform`),
   `MirrorAxis`, and `EditingStack.featureTree?.finalCrop` for the output size.
+- `BackgroundRemovalFeature.swift`: a `SourceFeatureType` holding a Vision subject
+  mask made from `loadedState.editingSourceImage`, inserted at index 0 through
+  `applyEdit`. Export switches JPEG to PNG while it's in the edit.
 - `AdjustSizeView.swift` and `ImageSizeAdjustment.swift` are app-only; Adjust Size
   is applied after Brightroom renders and isn't part of Brightroom's undo.
 
@@ -155,3 +173,5 @@ In the editor (Files → an image → Edit), in the Crop tool:
 4. Paint a blur mask, then Flip: the blur stays on the same subject.
 5. Adjust Size to half the width, Done, and check the saved image's size and that it
    matches the preview, including the flip.
+6. Remove Background: the canvas shows the cut-out; Flip keeps it aligned; Undo brings
+   the background back and Redo removes it again; Done saves a transparent PNG.

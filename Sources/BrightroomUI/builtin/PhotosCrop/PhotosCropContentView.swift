@@ -214,7 +214,8 @@ struct PhotosCropContentView: View {
       onRedo: redo,
       onRotate: rotate(_:),
       onMirror: mirror,
-      onCommitPendingEdits: commitPendingEdits
+      onCommitPendingEdits: commitPendingEdits,
+      onApplyEdit: applyEdit
     )
   }
 
@@ -282,6 +283,14 @@ struct PhotosCropContentView: View {
     commitPendingEdits()
     editingModel.mirrorOutput(axis)
     // A mirror is its own undo step.
+    editingModel.commitCurrentEditIfNeeded()
+    reloadAction()
+  }
+
+  private func applyEdit(_ mutate: (inout EditingStack.Edit) -> Void) {
+    commitPendingEdits()
+    editingModel.applyEdit(mutate)
+    // A host edit is its own undo step.
     editingModel.commitCurrentEditIfNeeded()
     reloadAction()
   }

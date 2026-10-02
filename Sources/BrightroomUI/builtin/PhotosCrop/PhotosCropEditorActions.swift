@@ -1,3 +1,4 @@
+import BrightroomEngine
 import BrightroomParametric
 
 /// The direction of a quarter-turn rotation, as seen on screen.
@@ -29,6 +30,7 @@ public struct PhotosCropEditorActions {
   let onRotate: (PhotosCropRotationDirection) -> Void
   let onMirror: (MirrorAxis) -> Void
   let onCommitPendingEdits: () -> Void
+  let onApplyEdit: ((inout EditingStack.Edit) -> Void) -> Void
 
   /// Undoes the most recent edit, including crop work not yet committed.
   public func undo() {
@@ -57,5 +59,15 @@ public struct PhotosCropEditorActions {
   /// the output size.
   public func commitPendingEdits() {
     onCommitPendingEdits()
+  }
+
+  /// Changes the current edit as one undo step of its own, the way mirroring
+  /// does: pending crop work is committed first, and the canvas reloads after.
+  ///
+  /// Hosts use this to add or remove their own features, such as a
+  /// `SourceFeatureType` at the front of the main tree. Available in every
+  /// tool, like undo and redo.
+  public func applyEdit(_ mutate: (inout EditingStack.Edit) -> Void) {
+    onApplyEdit(mutate)
   }
 }

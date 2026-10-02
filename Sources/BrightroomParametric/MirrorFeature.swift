@@ -15,7 +15,7 @@ public enum MirrorAxis: Equatable, Sendable, CaseIterable {
 ///
 /// The output keeps the input's extent, so features after this one keep
 /// addressing the same coordinate space: only the pixels under it move.
-public struct MirrorFeature: DomainFeatureType, Codable {
+public struct MirrorFeature: SourceFeatureType, Codable {
 
   /// The stable identity of this mirror.
   public var id: FeatureID

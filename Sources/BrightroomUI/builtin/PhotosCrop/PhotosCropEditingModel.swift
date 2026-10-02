@@ -178,6 +178,15 @@ public final class PhotosCropEditingModel {
     applyEditIfChanged(edit)
   }
 
+  /// Changes the current edit with a host-supplied mutation.
+  func applyEdit(_ mutate: (inout EditingStack.Edit) -> Void) {
+    guard var edit = loadedState?.currentEdit else {
+      return
+    }
+    mutate(&edit)
+    applyEditIfChanged(edit)
+  }
+
   /// Whether a crop-canvas state differs from the stack's final crop, meaning
   /// the canvas holds crop work that has not been applied yet.
   func hasUnappliedCropChanges(_ crop: CropEditingState) -> Bool {

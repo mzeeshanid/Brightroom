@@ -25,9 +25,11 @@ extension EditingStack.Edit {
   /// mirrored, rather than the same crop rectangle over mirrored pixels.
   ///
   /// The mirror is a single domain node at the front of the main tree, removed
-  /// again once it mirrors along neither axis. Features up to and including the
-  /// first crop are mapped into the mirrored domain; features after that crop
-  /// live in its output domain and are left as they are.
+  /// again once it mirrors along neither axis. Other source features already at
+  /// the front stay ahead of it, so they keep addressing the unmirrored source.
+  /// Features up to and including the first crop are mapped into the mirrored
+  /// domain; features after that crop live in its output domain and are left
+  /// as they are.
   public mutating func mirror(_ axis: MirrorAxis) {
     let domainSize = imageSize
 
@@ -67,7 +69,13 @@ extension EditingStack.Edit {
     }
 
     if mirror.isIdentity == false {
-      features.insert(.domain(mirror), at: 0)
+      let index = features.prefix { feature in
+        if case let .domain(domain) = feature {
+          return domain is any SourceFeatureType
+        }
+        return false
+      }.count
+      features.insert(.domain(mirror), at: index)
     }
     replaceFeatures(features)
   }
